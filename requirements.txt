@@ -1,0 +1,15 @@
+Python==3.10.12
+Docker==24.0.7
+shap==0.44.1
+phik==0.12.4
+torch==2.1.0+cu121
+jsonpickle==3.0.2
+numpy==1.23.5
+pandas==1.5.3
+seaborn==0.13.1
+lightgbm==4.1.0
+matplotlib==3.7.1
+scikit-learn==1.2.2
+catboost==1.2.2
+sentence-transformers==2.2.2
+
