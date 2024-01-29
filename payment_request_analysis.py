@@ -1,6 +1,6 @@
 import os
-import torch
-# import pickle
+# import torch
+import pickle
 import random
 import numpy as np
 import pandas as pd
@@ -8,11 +8,11 @@ import pandas as pd
 from catboost import CatBoostClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
-from sentence_transformers import SentenceTransformer
-from sklearn.metrics import roc_auc_score, precision_score
+# from sentence_transformers import SentenceTransformer
+from sklearn.metrics import roc_auc_score, precision_score, f1_score
 
 RANDOM_STATE = 42
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class PaymentRequestAnalysis:
 	'''
@@ -33,11 +33,8 @@ class PaymentRequestAnalysis:
 		self.y_valid = None
 		self.y_test = None
 		self.model = CatBoostClassifier(random_state=RANDOM_STATE, text_features=['purpose'], eval_metric='AUC')
-		self.accuracy_before_scaling = None
-		self.accuracy_after_scaling = None
-		self.scaling_effect_percentage = None
-
-	def load_datasets(self):
+		
+	def load_datasets(self, folder_name):
 		'''
   загрузка датасетов с данными
   '''
@@ -59,17 +56,31 @@ class PaymentRequestAnalysis:
   '''
 		self.orders = self.orders.drop_duplicates().reset_index(drop=True)
 		self.orders = self.orders.drop(self.orders[self.orders['status_id'] > 16].index)
-		self.orders['fact_of_payment'] = self.orders['status_id'].apply(lambda x: 1 if x == 6 or x == 13 or x == 5 or x == 15 else 0).astype('int8')
-		self.orders[['order_date', 'start_date', 'first_lesson_date', 'payment_date']] = self.orders[['order_date', 'start_date', 'first_lesson_date', 'payment_date']].apply(pd.to_datetime)
+		self.orders['fact_of_payment'] = (
+			self.orders['status_id']
+			.apply(lambda x: 1 if x == 6 or x == 13 or x == 5 or x == 15 else 0).astype('int8')
+		)
+		self.orders[['order_date', 'start_date', 'first_lesson_date', 'payment_date']] = (
+			self.orders[['order_date', 'start_date', 'first_lesson_date', 'payment_date']]
+			.apply(pd.to_datetime)
+		)
 		self.orders['order_month'] = self.orders['order_date'].dt.month.astype('int8')
 		self.orders = self.orders.drop(self.orders[self.orders['subject_id'] > 36].index)
 		self.orders['subject_id'] = self.orders['subject_id'].fillna(0)
 		self.orders['teacher_sex'] = self.orders['teacher_sex'].astype('int8')
 		self.orders['purpose'] = self.orders['purpose'].fillna('data not entered')
-		self.orders['lesson_price_cat'] = self.orders['lesson_price'].apply(lambda x: 1 if x < 500 else 2 if 500 <= x < 1500 else 3 if 1500 <= x <= 3000 else 4).astype('int8')
+		self.orders['lesson_price_cat'] = (self.orders['lesson_price']
+										   .apply(lambda x: 1 if x < 500 
+												  else 2 if 500 <= x < 1500 
+												  else 3 if 1500 <= x <= 3000 
+												  else 4).astype('int8')
+										  )
 		self.orders['home_metro_id'] = self.orders['home_metro_id'].fillna(-1)
 		self.orders = self.orders.drop(self.orders[self.orders['additional_status_id'] == 1].index)
-		self.orders['amount_to_pay'] = self.orders['amount_to_pay'].apply(lambda x: pd.to_numeric(x.replace(',', '.'), errors='coerce')).fillna(0).astype('float32')
+		self.orders['amount_to_pay'] = (self.orders['amount_to_pay']
+										.apply(lambda x: pd.to_numeric(x.replace(',', '.'), errors='coerce'))
+										.fillna(0).astype('float32')
+									   )
 		self.orders['planned_lesson_number'] = self.orders['planned_lesson_number'].astype('int8')
 		self.orders['pupil_category_new_id'] = self.orders['pupil_category_new_id'].fillna(-1)
 		self.orders['pupil_category_new_id'] = self.orders['pupil_category_new_id'].astype('int8')
@@ -81,7 +92,9 @@ class PaymentRequestAnalysis:
 		self.orders['source_id'] = self.orders['source_id'].astype('int8')
 		
 		self.orders['order_group'] = self.orders['original_order_id'].fillna(self.orders['id'])
-		self.orders['fact_of_payment'] = self.orders.groupby('order_group')['fact_of_payment'].transform(lambda x: 1 if x.any() else x)
+		self.orders['fact_of_payment'] = (self.orders.groupby('order_group')['fact_of_payment']
+										  .transform(lambda x: 1 if x.any() else x)
+										 )
 		self.orders = self.orders[self.orders['original_order_id'].isnull()]
 		self.orders = self.orders.drop('order_group', axis=1)
 
@@ -186,7 +199,45 @@ class PaymentRequestAnalysis:
 																 )
 	
 		
+	def ml_model_training(self):
+		'''
+  производит обучение модели и расчёт метрик
+  '''
+		self.model.fit(self.X_train.drop(['purpose_emb'], axis=1),
+					   self.y_train,
+					   eval_set=(self.X_valid.drop(['purpose_emb'], axis=1), elf.y_valid),
+					   verbose=100)
+
+		y_pred_proba = self.model.predict_proba(self.X_valid.drop(['purpose_emb'], axis=1))[:, 1]
+		y_pred = self.model.predict(self.X_valid.drop(['purpose_emb'], axis=1).values)
+
+		roc_auc_value = roc_auc_score(self.y_valid, y_pred_proba)
+		precision = precision_score(self.y_valid, y_pred)
+		f1 = f1_score(self.y_valid, y_pred)
 		
+	def evaluate_model(self):
+		'''производит проверку модели на отложенной выборке'''
+		y_proba_test = self.model.predict_proba(self.X_test.drop(['purpose_emb'], axis=1))[:, 1]
+		roc_auc_test = roc_auc_score(self.y_test, y_proba_test)
+		y_pred_test = self.model.predict(self.X_test.drop(['purpose_emb'], axis=1).values)
+		precision_test = precision_score(self.y_test, y_pred_test)
+		f1_test = f1_score(self.y_test, y_pred_test)
+
+		features_importance = pd.DataFrame(data = {'feature': self.X_train.drop(['purpose_emb'], axis=1).columns,
+												   'percent': np.round(self.model.feature_importances_, decimals=1)})
+		print(features_importance.sort_values('percent', ascending=False).reset_index(drop=True)[:5])
+		print(f"ROC-AUC на тестовой выборке: {round(roc_auc_test, 2)}")
+		print(f"Precision на тестовой выборке: {round(precision_test, 2)}")
+		print(f"F1 на тестовой выборке: {round(f1_test, 2)}")
 		
-		
-			
+		with open('model_ctbst', 'wb') as f:
+			pickle.dump(self.model, f)
+
+	def performing_all_calculations(self, folder_name=data):
+		'''производит выполнение всех функций'''
+		self.load_datasets()
+		self.data_preparing()
+		self.data_merging()
+		self.data_preparation()
+		self.ml_model_training()
+		self.evaluate_model()
