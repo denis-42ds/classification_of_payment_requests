@@ -1,5 +1,4 @@
 import os
-# import torch
 import pickle
 import random
 import numpy as np
@@ -8,11 +7,9 @@ import pandas as pd
 from catboost import CatBoostClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
-# from sentence_transformers import SentenceTransformer
 from sklearn.metrics import roc_auc_score, precision_score, f1_score
 
 RANDOM_STATE = 42
-# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class PaymentRequestAnalysis:
 	'''
@@ -54,12 +51,10 @@ class PaymentRequestAnalysis:
   - создание новых признаков
   - изменение типов данных
   '''
-		self.orders = self.orders.drop_duplicates().reset_index(drop=True)
+		self.orders.drop_duplicates(inplace=True)
+		self.orders.reset_index(drop=True, inplace=True)
 		self.orders = self.orders.drop(self.orders[self.orders['status_id'] > 16].index)
-		self.orders['fact_of_payment'] = (
-			self.orders['status_id']
-			.apply(lambda x: 1 if x == 6 or x == 13 or x == 5 or x == 15 else 0).astype('int8')
-		)
+		self.orders['fact_of_payment'] = (self.orders['status_id'].isin([6, 13, 5, 15])).astype('int8')
 		self.orders[['order_date', 'start_date', 'first_lesson_date', 'payment_date']] = (
 			self.orders[['order_date', 'start_date', 'first_lesson_date', 'payment_date']]
 			.apply(pd.to_datetime)
@@ -122,9 +117,11 @@ class PaymentRequestAnalysis:
 		
 		self.teachers_info = self.teachers_info.drop_duplicates().reset_index(drop=True)
 		
-		self.suitable_teachers = self.suitable_teachers.drop_duplicates().reset_index(drop=True)
+		self.suitable_teachers.drop_duplicates(inplace=True)
+		self.suitable_teachers.reset_index(drop=True, inplace=True)
 		
-		self.prefered_teachers_order_id = self.prefered_teachers_order_id.drop_duplicates().reset_index(drop=True)
+		self.prefered_teachers_order_id.drop_duplicates(inplace=True)
+		self.prefered_teachers_order_id.reset_index(drop=True, inplace=True)
 
 	def data_merging(self):
 		'''
@@ -152,16 +149,6 @@ class PaymentRequestAnalysis:
 								   )
 		self.df = self.df.drop(['working_teacher_id', 'teacher_id_x', 'order_id_x', 'order_id_y', 'teacher_id_y'], axis=1)
 
-	# def data_encoding(self):
-	# 	'''
- #  - преобразует текстовые признаки в эмбеддинги,
- #  - получает из них среднее значение,
- #  - добавляет к датафрейму новый признак
- #  '''
-	# 	minilm = SentenceTransformer('all-MiniLM-L6-v2', device=device)
-	# 	embeddings = minilm.encode(self.df['purpose'].values, device=device)
-	# 	self.df['purpose_emb'] = np.mean(embeddings, axis=1)
-		
 	def data_preparation(self):
 		'''
   - производит отделение целевого признака,
@@ -233,9 +220,9 @@ class PaymentRequestAnalysis:
 		with open('model_ctbst', 'wb') as f:
 			pickle.dump(self.model, f)
 
-	def performing_all_calculations(self, folder_name=data):
+	def performing_all_calculations(self, folder_name='data'):
 		'''производит выполнение всех функций'''
-		self.load_datasets()
+		self.load_datasets(folder_name)
 		self.data_preparing()
 		self.data_merging()
 		self.data_preparation()
