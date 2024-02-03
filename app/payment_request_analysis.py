@@ -29,7 +29,9 @@ class PaymentRequestAnalysis:
 		self.y_train = None
 		self.y_valid = None
 		self.y_test = None
-		self.model = CatBoostClassifier(random_state=RANDOM_STATE, text_features=['purpose'], eval_metric='AUC')
+		self.model = CatBoostClassifier(random_state=RANDOM_STATE,
+										text_features=['purpose', 'contact_result'],
+										eval_metric='AUC')
 		
 	def load_datasets(self, folder_name):
 		'''
@@ -51,6 +53,7 @@ class PaymentRequestAnalysis:
   - создание новых признаков
   - изменение типов данных
   '''
+		# обработка датафрейма orders
 		self.orders.drop_duplicates(inplace=True)
 		self.orders.reset_index(drop=True, inplace=True)
 		self.orders = self.orders.drop(self.orders[self.orders['status_id'] > 16].index)
@@ -72,10 +75,6 @@ class PaymentRequestAnalysis:
 										  )
 		self.orders['home_metro_id'] = self.orders['home_metro_id'].fillna(-1)
 		self.orders = self.orders.drop(self.orders[self.orders['additional_status_id'] == 1].index)
-		self.orders['amount_to_pay'] = (self.orders['amount_to_pay']
-										.apply(lambda x: pd.to_numeric(x.replace(',', '.'), errors='coerce'))
-										.fillna(0).astype('float32')
-									   )
 		self.orders['planned_lesson_number'] = self.orders['planned_lesson_number'].astype('int8')
 		self.orders['pupil_category_new_id'] = self.orders['pupil_category_new_id'].fillna(-1)
 		self.orders['pupil_category_new_id'] = self.orders['pupil_category_new_id'].astype('int8')
@@ -111,15 +110,68 @@ class PaymentRequestAnalysis:
 										 'max_metro_distance',
 										 'estimated_fee',
 										 'payment_date',
-										 'is_display_to_teachers'],
+										 'is_display_to_teachers',
+										 'working_teacher_id',
+										 'amount_to_pay'],
 										axis=1))
 		
-		
+		# обработка датафрейма teachers_info
 		self.teachers_info = self.teachers_info.drop_duplicates().reset_index(drop=True)
+		teachers_columns_duplicated = self.teachers_info.T.duplicated(keep=False)
+		teacher_columns_duplicated = (
+			list(set(teachers_columns_duplicated[teachers_columns_duplicated].index) - 
+				 set(pd.Series(teachers_columns_duplicated[teachers_columns_duplicated].index)
+					 .str.split('.').str[0].unique()))
+		)
+		self.teachers_info = self.teachers_info.drop(columns=teacher_columns_duplicated)
 		
+		self.teachers_info['photo_path'] = self.teachers_info['photo_path'].astype(str)
+		self.teachers_info['photo_path'].fillna('No Photo', inplace=True)
+		self.teachers_info['has_photo'] = (
+			self.teachers_info['photo_path']
+			.apply(lambda x: 1 if pd.notnull(x) else 0)
+			.astype(np.int8)
+		)
+		self.teachers_info.drop(['date_update',
+								 'reg_date',
+								 'birth_date',
+								 'teaching_start_date',
+								 'user_id',
+								 'external_comments',
+								 'lesson_duration',
+								 'lesson_cost',
+								 'status_relevant_date',
+								 'status_school_id',
+								 'status_college_id',
+								 'status_relevant_date',
+								 'information',
+								 'photo_path',
+								 'comments',
+								 'rules_confirmed_date',
+								 'last_visited',
+								 'is_pupils_needed',
+								 'pupil_needed_date',
+								 'amount_to_pay',
+								 'remote_comments',
+								 'passport_id',
+								 'is_individual',
+								 'partner_id',
+								 'relevance_date',
+								 'status_institution_id',
+								 'free_time_relevance_date',
+								 'rating_for_users_yesterday'],
+								inplace=True,
+								axis=1)
+
+		# обработка датафрейма suitable_teachers
 		self.suitable_teachers.drop_duplicates(inplace=True)
 		self.suitable_teachers.reset_index(drop=True, inplace=True)
-		
+		self.suitable_teachers = (
+			self.suitable_teachers[(self.suitable_teachers['enable_assign'] == 1) | 
+			(self.suitable_teachers['enable_auto_assign'] == 1)]
+		)
+
+		# обработка датафрейма prefered_teachers_order_id
 		self.prefered_teachers_order_id.drop_duplicates(inplace=True)
 		self.prefered_teachers_order_id.reset_index(drop=True, inplace=True)
 
@@ -129,25 +181,29 @@ class PaymentRequestAnalysis:
   - очистку при необходимости
   - создание дополнительных признаков при необходимости
   '''
-		self.df = (self.orders
-				   .merge(self.suitable_teachers[['teacher_id', 'order_id']],
-						  how='left',
-						  left_on=['id', 'working_teacher_id'],
-						  right_on=['order_id', 'teacher_id'])
-				   .drop_duplicates()
-				   .reset_index(drop=True)
-				   .merge(self.prefered_teachers_order_id,
-						  how='left',
-						  left_on=['id', 'working_teacher_id'],
-						  right_on=['order_id', 'teacher_id'])
-				   .drop_duplicates()
-				   .reset_index(drop=True)
-				  )
-		self.df['right_teacher'] = (np.where((self.df['working_teacher_id'] == self.df['teacher_id_x']) & 
-											 (self.df['working_teacher_id'] == self.df['teacher_id_y']), 1, 0)
-									.astype('int8')
-								   )
-		self.df = self.df.drop(['working_teacher_id', 'teacher_id_x', 'order_id_x', 'order_id_y', 'teacher_id_y'], axis=1)
+		df_teachers = (
+			self.suitable_teachers[['teacher_id', 'order_id', 'contact_result']]
+			.merge(self.teachers_info,
+				   how='left',
+				   left_on=['teacher_id'],
+				   right_on=['id'])
+			.drop_duplicates()
+			.reset_index(drop=True)
+			.drop('id', axis=1)
+		)
+		self.df = (
+			self.orders
+			.merge(df_teachers,
+				   how='left',
+				   left_on=['id'],
+				   right_on=['order_id'])
+			.drop_duplicates()
+			.reset_index(drop=True)
+			.drop('order_id', axis=1)
+		)
+		self.df = self.df.dropna(subset=['teacher_id']).reset_index(drop=True)
+		self.df['contact_result'] = self.df['contact_result'].astype(str)
+		self.df['contact_result'] = self.df['contact_result'].fillna('не заполнено')
 
 	def data_preparation(self):
 		'''
@@ -157,16 +213,16 @@ class PaymentRequestAnalysis:
   - на выходе: три выборки,
     печать размерностей этих выборок
 	'''
-		order_id = self.df['id']
+		ids = self.df[['id', 'teacher_id']]
 		y = self.df['fact_of_payment']
-		X = self.df.drop(['id', 'fact_of_payment'], axis=1)
+		X = self.df.drop(['id', 'teacher_id', 'fact_of_payment'], axis=1)
 
 		scaler = StandardScaler()
 		X_es = (
-			pd.DataFrame(scaler.fit_transform(X.drop(['purpose'], axis=1)),
-						 columns=X.drop(['purpose'], axis=1).columns,
-						 index=X.drop(['purpose'], axis=1).index)
-			.merge(X['purpose'],
+			pd.DataFrame(scaler.fit_transform(X.drop(['purpose', 'contact_result'], axis=1)),
+						 columns=X.drop(['purpose', 'contact_result'], axis=1).columns,
+						 index=X.drop(['purpose', 'contact_result'], axis=1).index)
+			.merge(X[['purpose', 'contact_result']],
 				   how='left',
 				   left_index=True,
 				   right_index=True,
@@ -190,13 +246,13 @@ class PaymentRequestAnalysis:
 		'''
   производит обучение модели и расчёт метрик
   '''
-		self.model.fit(self.X_train.drop(['purpose_emb'], axis=1),
+		self.model.fit(self.X_train,
 					   self.y_train,
-					   eval_set=(self.X_valid.drop(['purpose_emb'], axis=1), elf.y_valid),
+					   eval_set=(self.X_valid, self.y_valid),
 					   verbose=100)
 
-		y_pred_proba = self.model.predict_proba(self.X_valid.drop(['purpose_emb'], axis=1))[:, 1]
-		y_pred = self.model.predict(self.X_valid.drop(['purpose_emb'], axis=1).values)
+		y_pred_proba = self.model.predict_proba(self.X_valid)[:, 1]
+		y_pred = self.model.predict(self.X_valid.values)
 
 		roc_auc_value = roc_auc_score(self.y_valid, y_pred_proba)
 		precision = precision_score(self.y_valid, y_pred)
@@ -204,13 +260,13 @@ class PaymentRequestAnalysis:
 		
 	def evaluate_model(self):
 		'''производит проверку модели на отложенной выборке'''
-		y_proba_test = self.model.predict_proba(self.X_test.drop(['purpose_emb'], axis=1))[:, 1]
+		y_proba_test = self.model.predict_proba(self.X_test)[:, 1]
 		roc_auc_test = roc_auc_score(self.y_test, y_proba_test)
-		y_pred_test = self.model.predict(self.X_test.drop(['purpose_emb'], axis=1).values)
+		y_pred_test = self.model.predict(self.X_test.values)
 		precision_test = precision_score(self.y_test, y_pred_test)
 		f1_test = f1_score(self.y_test, y_pred_test)
 
-		features_importance = pd.DataFrame(data = {'feature': self.X_train.drop(['purpose_emb'], axis=1).columns,
+		features_importance = pd.DataFrame(data = {'feature': self.X_train.columns,
 												   'percent': np.round(self.model.feature_importances_, decimals=1)})
 		print(features_importance.sort_values('percent', ascending=False).reset_index(drop=True)[:5])
 		print(f"ROC-AUC на тестовой выборке: {round(roc_auc_test, 2)}")
