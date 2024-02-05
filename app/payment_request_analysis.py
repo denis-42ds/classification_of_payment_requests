@@ -37,7 +37,7 @@ class PaymentRequestAnalysis:
 		'''
   загрузка датасетов с данными
   '''
-		orders_path = os.path.join(folder_name, 'orders.feather')
+		orders_path = os.path.join(folder_name, 'orders_test.feather')  # внесено изменение. верный файл orders.feather
 		teachers_info_path = os.path.join(folder_name, 'teachers_info.feather')
 		suitable_teachers_path = os.path.join(folder_name, 'suitable_teachers.feather')
 		prefered_teachers_order_id_path = os.path.join(folder_name, 'prefered_teachers_order_id.feather')
@@ -284,3 +284,7 @@ class PaymentRequestAnalysis:
 		self.data_preparation()
 		self.ml_model_training()
 		self.evaluate_model()
+		
+		# Сохранение обученной модели в файл
+		with open('trained_prediction_model.pkl', 'wb') as f:
+			pickle.dump(model, f)
