@@ -126,7 +126,7 @@ class PaymentRequestAnalysis:
 		self.teachers_info = self.teachers_info.drop(columns=teacher_columns_duplicated)
 		
 		self.teachers_info['photo_path'] = self.teachers_info['photo_path'].astype(str)
-		self.teachers_info['photo_path'].fillna('No Photo', inplace=True)
+		self.teachers_info.fillna({'photo_path': 'No Photo'}, inplace=True)
 		self.teachers_info['has_photo'] = (
 			self.teachers_info['photo_path']
 			.apply(lambda x: 1 if pd.notnull(x) else 0)
@@ -204,6 +204,19 @@ class PaymentRequestAnalysis:
 		self.df = self.df.dropna(subset=['teacher_id']).reset_index(drop=True)
 		self.df['contact_result'] = self.df['contact_result'].astype(str)
 		self.df['contact_result'] = self.df['contact_result'].fillna('не заполнено')
+
+	def data_scaling(self):
+		'''производит масштабирование числовых признаков'''
+		scaler = StandardScaler()
+		ids = self.df['id']
+		columns_to_scale = self.df.drop(['id', 'purpose', 'contact_result'], axis=1).columns
+		scaled_features = scaler.fit_transform(self.df[columns_to_scale])
+		df_scaled = pd.DataFrame(scaled_features, columns=columns_to_scale)
+		df_scaled[['purpose', 'contact_result']] = self.df[['purpose', 'contact_result']].astype(str)
+		df_scaled = df_scaled.drop(['teacher_id', 'fact_of_payment'], axis=1)
+				
+		return ids, df_scaled
+
 
 	def data_preparation(self):
 		'''

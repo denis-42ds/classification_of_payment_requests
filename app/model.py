@@ -1,43 +1,31 @@
-import os
 import pickle
-import random
-import numpy as np
 import pandas as pd
-
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import roc_auc_score, precision_score, f1_score
-
 from payment_request_analysis import PaymentRequestAnalysis
 
-RANDOM_STATE = 42
+class PredictionModel:
+    def __init__(self, directory):
+        self.directory = directory
+    
+    def predict(self):
+        # Загрузка сохранённой обученной модели
+        with open('trained_prediction_model.pkl', 'rb') as f:
+            model = pickle.load(f)
 
-#  Загрузка сохранённой обученной модели
-with open('trained_prediction_model.pkl', 'rb') as f:
-	model = pickle.load(f)
+        # Создание экземпляра класса PaymentRequestAnalysis
+        payment_analysis = PaymentRequestAnalysis()
 
-payment_analysis.load_datasets('data')
-payment_analysis.data_preparing()
-payment_analysis.data_merging()
+        # Подготовка данных
+        payment_analysis.load_datasets(self.directory)
+        payment_analysis.data_preparing()
+        payment_analysis.data_merging()
+        ids, df_scaled = payment_analysis.data_scaling()
 
-def data_scaling(df):
-    '''
-    - производит масштабирование указанных признаков
-    - на выходе: масштабированный датафрейм
-    '''
-    scaler = StandardScaler()
-    scaled_features = scaler.fit_transform(df.drop(['purpose', 'contact_result'], axis=1))
+        # Получение предсказаний
+        predictions = model.predict_proba(df_scaled)
+        solution = pd.DataFrame(predictions, index=ids, columns=['non_payment_proba', 'payment_proba'])
+        solution.to_csv('solution.csv', index_label='id')
 
-    df_scaled = pd.DataFrame(scaled_features, columns=df.drop(['purpose', 'contact_result'], axis=1).columns)
-    df_scaled['purpose'] = df['purpose'].astype(str)
-    df_scaled['contact_result'] = df['contact_result'].astype(str)
-
-    return df_scaled
-
-df_scaled = data_scaling(payment_analysis.df)
-
-# Получение предсказаний на масштабированном датафрейме
-predictions = model.predict(df_scaled)
-
-# Вывод предсказаний
-print(predictions)
+# Пример использования класса PredictionModel
+if __name__ == '__main__':
+    model = PredictionModel('data')
+    model.predict()
